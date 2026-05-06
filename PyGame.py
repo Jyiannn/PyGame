@@ -53,27 +53,20 @@ game_surface = pygame.Surface((INTERNAL_WIDTH, INTERNAL_HEIGHT))
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # --- ASSET CONFIGURATION ---
+
 ASSET_DIR = "assets" 
 
 def get_image(filename, fallback_col):
-
     abs_path = os.path.join(BASE_PATH, ASSET_DIR, *filename.split("/"))
-    
     try:
         if os.path.exists(abs_path):
             img = pygame.image.load(abs_path).convert_alpha()
-            print(f"✅ SUCCESS: Loaded {filename}")
             return img
     except Exception as e:
-        print(f"⚠️ ERROR loading {abs_path}: {e}")
-    
-    # Fallback to a solid color square if the file is missing
-    print(f"❌ FAILED: {filename} not found. Using fallback color.")
+        pass
     surf = pygame.Surface((128, 128), pygame.SRCALPHA)
     surf.fill(fallback_col)
     return surf
-
-screen = pygame.display.set_mode((INTERNAL_WIDTH, INTERNAL_HEIGHT), flags)
 
 SPRITE_ENEMY_FRONT = get_image("Sprites (Final)/enemy_front.png", RED)
 SPRITE_ENEMY_BACK  = get_image("Sprites (Final)/enemy_back.png", (150, 0, 0))
@@ -226,6 +219,7 @@ class Enemy:
         self.last_dx, self.last_dy = (ex if moved_x else 0), (ey if moved_y else 0)
 
 # --- WORLD MAP & SETUP ---
+
 world_map = [
     [1,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1],
     [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
@@ -299,21 +293,17 @@ def cast_ray(px, py, pa, ra):
 
 def draw_sprites(surface):
     all_sprites = []
-
     for e in enemies:
         v_player_x, v_player_y = player.x - e.x, player.y - e.y
         dot_to_player = (e.last_dx * v_player_x) + (e.last_dy * v_player_y)
         img = SPRITE_ENEMY_FRONT if dot_to_player >= 0 else SPRITE_ENEMY_BACK
         all_sprites.append({'x': e.x, 'y': e.y, 'img': img, 'type': 'E'})
-        
     for b in batteries:
         if not b.picked_up: all_sprites.append({'x': b.x, 'y': b.y, 'img': SPRITE_BATTERY, 'type': 'B'})
     for k in keys_list:
         if not k.picked_up: all_sprites.append({'x': k.x, 'y': k.y, 'img': SPRITE_KEY, 'type': 'K'})
-            
     all_sprites.sort(key=lambda s: math.hypot(player.x - s['x'], player.y - s['y']), reverse=True)
     bob_time = pygame.time.get_ticks() * 0.005
-
     for s in all_sprites:
         dx, dy = s['x'] - player.x, s['y'] - player.y
         dist = math.hypot(dx, dy)
@@ -321,22 +311,18 @@ def draw_sprites(surface):
         theta = math.atan2(dy, dx) - player.angle
         while theta > math.pi: theta -= 2*math.pi
         while theta < -math.pi: theta += 2*math.pi
-        
         if abs(theta) < HALF_FOV + 0.5: 
             proj_dist = dist * math.cos(theta)
             wall_h = 21000 / (proj_dist + 0.0001)
             middle_x = INTERNAL_WIDTH / 2 + theta * INTERNAL_WIDTH / RAD_FOV
-            
             lf = max(0.05, 1 - (dist/400)**2) if flashlight_on else 0.05
             it = int(255 * lf)
-            
             if s['type'] == 'E':
                 s_width, s_height = int(wall_h * 1.0), int(wall_h * 1.4)
                 y_pos = (INTERNAL_HEIGHT / 2) - (s_height / 2)
             else:
                 s_width, s_height = int(wall_h * 0.25), int(wall_h * 0.25)
                 y_pos = (INTERNAL_HEIGHT / 2) + (wall_h * 0.5) - s_height - (math.sin(bob_time) * (wall_h * 0.05))
-            
             ray_idx = int(middle_x / SCALE)
             if 0 <= ray_idx < NUM_RAYS and dist < z_buffer[ray_idx]:
                 scaled_img = pygame.transform.scale(s['img'], (max(1, s_width), max(1, s_height)))
@@ -414,16 +400,36 @@ def main():
             
             draw_sprites(game_surface)
             
+
             if player.is_hiding:
                 vignette = pygame.Surface((960, 540), pygame.SRCALPHA); pygame.draw.rect(vignette, (0,0,0,200), (0,0,960,120)); pygame.draw.rect(vignette, (0,0,0,200), (0,420,960,120)); game_surface.blit(vignette, (0,0))
                 pr = font_sm.render("[E] HIDE/EXIT", True, YELLOW); game_surface.blit(pr, pr.get_rect(center=(480, 480)))
             else:
                 current_prompt = None
-                for b in batteries:
-                    if not b.picked_up and math.hypot(player.x - b.x, player.y - b.y) < 70: current_prompt = font_sm.render("[E] TAKE BATTERY", True, YELLOW); break
+                # Check for door proximity (tile type 3)
+                tx, ty = int(player.x // TILE_SIZE), int(player.y // TILE_SIZE)
+                near_door = False
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        nx, ny = tx + dx, ty + dy
+                        if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE and world_map[ny][nx] == 3:
+                            if math.hypot(player.x - (nx * TILE_SIZE + 50), player.y - (ny * TILE_SIZE + 50)) < 120:
+                                near_door = True
+                                break
+                
+                if near_door:
+                    if player.keys_collected < 15:
+                        current_prompt = font_sm.render("COLLECT ALL 15 KEYS TO ESCAPE", True, RED)
+                    else:
+                        current_prompt = font_sm.render("[E] ESCAPE", True, GREEN)
+                
+                if not current_prompt:
+                    for b in batteries:
+                        if not b.picked_up and math.hypot(player.x - b.x, player.y - b.y) < 70: current_prompt = font_sm.render("[E] TAKE BATTERY", True, YELLOW); break
                 if not current_prompt:
                     for lock in lockers_list:
                         if math.hypot(player.x - (lock.x + lock.width/2), player.y - (lock.y + lock.depth/2)) < 70: current_prompt = font_sm.render("[E] HIDE/EXIT", True, WHITE); break
+                
                 if current_prompt: game_surface.blit(current_prompt, current_prompt.get_rect(center=(480, 480)))
 
             pygame.draw.circle(game_surface, YELLOW if flashlight_on else (30,30,30), (50,50), 20)
