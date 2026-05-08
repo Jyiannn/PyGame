@@ -22,9 +22,9 @@ SCALE = INTERNAL_WIDTH / NUM_RAYS
 FOV = 90
 HALF_FOV = math.radians(FOV / 2)
 RAD_FOV = math.radians(FOV)
-MAX_DEPTH = 1600 
+MAX_DEPTH = 2100 
 TILE_SIZE = 100
-MAP_SIZE = 16
+MAP_SIZE = 21
 BATTERY_RESPAWN_DELAY = 30 * 60 
 MAX_BATTERIES = 4
 
@@ -92,7 +92,20 @@ class Battery:
             tx, ty = random.randint(1, MAP_SIZE-2), random.randint(1, MAP_SIZE-2)
             if world_map[ty][tx] == 0:
                 new_x, new_y = tx * TILE_SIZE + 50, ty * TILE_SIZE + 50
-                if math.hypot(new_x - player.x, new_y - player.y) > 200:
+            
+            # Check distance from player
+                dist_to_player = math.hypot(new_x - player.x, new_y - player.y)
+            
+            # Check distance from other existing batteries
+                too_close_to_battery = False
+                for b in batteries:
+                # Only check against batteries that are already placed/active
+                    if b != self and not b.picked_up:
+                        if math.hypot(new_x - b.x, new_y - b.y) < 400:
+                            too_close_to_battery = True
+                            break
+            
+                if dist_to_player > 200 and not too_close_to_battery:
                     self.x, self.y = new_x, new_y
                     self.picked_up = False
                     break
@@ -127,7 +140,7 @@ class Player:
         self.reset(x, y)
     def reset(self, x, y):
         self.x, self.y = x, y
-        self.angle, self.speed = 0, 3
+        self.angle, self.speed = 4.8, 3
         self.is_hiding, self.exit_pos = False, (x, y)
         self.current_locker, self.keys_collected = None, 0
         
@@ -140,7 +153,7 @@ class Player:
         if keys[K_a] or keys[K_LEFT]: dx, dy = self.speed * sin_a, -self.speed * cos_a
         if keys[K_d] or keys[K_RIGHT]: dx, dy = -self.speed * sin_a, self.speed * cos_a
         
-        margin = 15
+        margin = 28
         tx_next = int((self.x + dx + (margin if dx>0 else -margin)) // TILE_SIZE)
         ty_next = int((self.y + dy + (margin if dy>0 else -margin)) // TILE_SIZE)
         can_move_x = world_map[int(self.y // TILE_SIZE)][tx_next] == 0
@@ -185,7 +198,7 @@ class Enemy:
         self.reset()
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 0.5, 1.2
+        self.speed_wander, self.speed_chase = 0.8, 1.2
         self.detection_range, self.is_chasing = 600, False
         self.wander_angle = random.uniform(0, math.pi * 2)
     def update(self, player):
@@ -221,22 +234,27 @@ class Enemy:
 # --- WORLD MAP & SETUP ---
 
 world_map = [
-    [1,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,1,1,0,2,1,1,0,0,1,1,0,0,0,1],
-    [1,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1],
-    [1,2,0,0,1,0,0,0,1,0,0,0,1,1,0,1],
-    [1,0,0,0,1,0,1,0,1,0,1,0,0,2,0,1],
-    [1,0,1,0,0,0,1,0,2,0,1,0,0,1,0,1],
-    [1,0,1,1,0,0,1,1,0,0,1,1,0,1,0,1],
-    [1,0,2,0,0,1,0,0,0,1,0,2,0,0,0,1],
-    [1,0,1,0,0,0,1,0,0,0,1,0,1,0,0,1],
-    [1,0,1,0,1,0,0,0,1,0,0,0,1,0,0,1],
-    [1,0,0,0,1,1,1,0,1,1,1,0,1,0,2,1],
-    [1,1,1,0,2,0,0,0,0,0,0,0,1,1,0,1],
-    [1,0,0,0,1,0,1,1,1,0,1,0,0,0,0,1],
-    [1,2,0,0,0,0,0,0,0,0,2,0,0,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    [1,1,1,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,2,0,1],
+    [1,0,1,1,0,1,0,1,1,1,1,1,1,1,0,1,1,1,1,0,1],
+    [1,0,1,2,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,0,1],
+    [1,0,1,1,1,1,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,1],
+    [1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,2,1,1],
+    [1,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,1,0,1,0,1,0,1,1,2,1,1,0,1,1,1,1,1,0,1],
+    [1,0,1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,0,0,1],
+    [1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1],
+    [1,0,0,0,2,1,0,0,0,0,1,0,0,0,0,0,1,2,1,0,1],
+    [1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,0,1,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],
+    [1,0,1,1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1],
+    [1,0,0,0,0,2,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ]
 
 lockers_list, locker_lookup = [], {}
@@ -247,9 +265,12 @@ for row_idx, row in enumerate(world_map):
             lockers_list.append(l); locker_lookup[(col_idx, row_idx)] = l
             world_map[row_idx][col_idx] = 0 
 
-player = Player(150, 150)
-enemies = [Enemy(500, 300), Enemy(800, 700), Enemy(1200, 500)]
-batteries = [Battery() for _ in range(MAX_BATTERIES)]
+player = Player(1050, 1950)
+enemies = [Enemy(150, 350), Enemy(1950, 350), Enemy(1050, 950)]
+batteries = []
+for _ in range(MAX_BATTERIES):
+    new_battery = Battery()
+    batteries.append(new_battery)
 
 def generate_keys():
     new_keys = []
@@ -257,7 +278,11 @@ def generate_keys():
         tx, ty = random.randint(1, MAP_SIZE-2), random.randint(1, MAP_SIZE-2)
         if world_map[ty][tx] == 0:
             kx, ky = tx * TILE_SIZE + 50, ty * TILE_SIZE + 50
-            if all(math.hypot(kx - k.x, ky - k.y) > 200 for k in new_keys): new_keys.append(Key(kx, ky))
+            too_close_to_key = any(math.hypot(kx - k.x, ky - k.y) < 300 for k in new_keys)
+            too_close_to_battery = any(math.hypot(kx - b.x, ky - b.y) < 200 for b in batteries)
+
+            if not too_close_to_key and not too_close_to_battery:
+                new_keys.append(Key(kx, ky))
     return new_keys
 
 keys_list = generate_keys()
@@ -313,9 +338,9 @@ def draw_sprites(surface):
         while theta < -math.pi: theta += 2*math.pi
         if abs(theta) < HALF_FOV + 0.5: 
             proj_dist = dist * math.cos(theta)
-            wall_h = 21000 / (proj_dist + 0.0001)
+            wall_h = 30000 / (proj_dist + 0.0001)
             middle_x = INTERNAL_WIDTH / 2 + theta * INTERNAL_WIDTH / RAD_FOV
-            lf = max(0.05, 1 - (dist/400)**2) if flashlight_on else 0.05
+            lf = max(0.01, 1 - (dist/400)**2) if flashlight_on else 0.01
             it = int(255 * lf)
             if s['type'] == 'E':
                 s_width, s_height = int(wall_h * 1.0), int(wall_h * 1.4)
@@ -353,7 +378,7 @@ def main():
                 elif state == "OPTIONS" and 380 < imx < 580 and 260 < imy < 280: dragging_slider = True
                 elif state in ["DEAD", "WIN"]:
                     if 280 < imy < 320: 
-                        player.reset(150, 150); [e.reset() for e in enemies]; keys_list = generate_keys()
+                        player.reset(1050, 1950); [e.reset() for e in enemies]; keys_list = generate_keys()
                         [b.respawn() for b in batteries]; flashlight_battery, flashlight_on, state = 1000, True, "GAME"
                         pygame.mouse.set_visible(False); pygame.event.set_grab(True)
                     elif 330 < imy < 370: game_started, state = False, "MENU"
@@ -393,9 +418,9 @@ def main():
                 ra = sa + r * RAD_FOV / NUM_RAYS
                 d, t, side, rd, tt = cast_ray(player.x, player.y, player.angle, ra)
                 z_buffer[r] = rd 
-                h, it = 21000 / (d + 0.0001), 255 / (1 + d*d*0.00003)
+                h, it = 35000 / (d + 0.0001), 255 / (1 + d*d*0.00003)
                 bc = (it*0.35, it*0.35, it*0.35) if tt == 3 else (LOCKER_COL[0]*it/255, LOCKER_COL[1]*it/255, LOCKER_COL[2]*it/255) if tt == 2 else (it*0.4*(1 if side==0 else 0.7), it*0.2*(1 if side==0 else 0.7), it*0.2*(1 if side==0 else 0.7))
-                lf = max(0.05, 1 - (d/380)**2) if flashlight_on else 0.05
+                lf = max(0.01, 1 - (d/380)**2) if flashlight_on else 0.01
                 pygame.draw.rect(game_surface, tuple(int(c * lf) for c in bc), (int(r * SCALE), 270 - h/2, math.ceil(SCALE)+1, h))
             
             draw_sprites(game_surface)
