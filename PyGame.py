@@ -26,7 +26,7 @@ MAX_DEPTH = 800
 TILE_SIZE = 100
 MAP_SIZE = 21
 BATTERY_RESPAWN_DELAY = 30 * 60 
-MAX_BATTERIES = 4
+MAX_BATTERIES = 6
 
 master_volume = 1.0
 sound_volumes = {
@@ -49,6 +49,8 @@ flashlight_on = True
 flashlight_battery = 1000
 is_fullscreen = False
 z_buffer = [MAX_DEPTH] * NUM_RAYS
+jumpscare_timer = 0
+killer_sprite = None
 
 # Colors
 BLACK = (0, 0, 0)
@@ -80,10 +82,27 @@ def get_image(filename, fallback_col):
     surf.fill(fallback_col)
     return surf
 
-SPRITE_ENEMY_FRONT = get_image("Sprites (Final)/enemy_front.png", RED)
-SPRITE_ENEMY_BACK  = get_image("Sprites (Final)/enemy_back.png", (150, 0, 0))
-SPRITE_BATTERY     = get_image("Sprites (Final)/battery.png", YELLOW)
-SPRITE_KEY         = get_image("Sprites (Final)/key.png", SILVER)
+# --- SPRITE CONFIGURATION ---
+
+# --- ENEMY SPRITES ---
+SPRITE_GHOST_F = get_image("Sprites (Final)/ghost_front.png", WHITE)
+SPRITE_GHOST_B = get_image("Sprites (Final)/ghost_back.png", GRAY)
+SPRITE_STALKER_F = get_image("Sprites (Final)/stalker_front.png", RED)
+SPRITE_STALKER_B = get_image("Sprites (Final)/stalker_back.png", (100, 0, 0))
+SPRITE_SHADOW_F = get_image("Sprites (Final)/shadow_front.png", (30, 30, 30))
+SPRITE_SHADOW_B = get_image("Sprites (Final)/shadow_back.png", BLACK)
+# --- ITEM SPRITES ---
+SPRITE_BATTERY = get_image("Sprites (Final)/battery.png", YELLOW)
+SPRITE_KEY = get_image("Sprites (Final)/key.png", SILVER)
+# --- HUD SPRITES ---
+SPRITE_FLASHLIGHT_ON = get_image("Sprites (Final)/flashlight_hud_on.png", YELLOW)
+SPRITE_FLASHLIGHT_OFF = get_image("Sprites (Final)/flashlight_hud_off.png", GRAY)
+# --- ENVIRONMENT SPRITES ---
+IMG_INSTRUCTIONS = get_image("Walls/instructions.png", (50, 50, 150))
+IMG_DEFAULT = get_image("Walls/default_wall.png", (150, 0, 0))
+IMG_RUN = get_image("Walls/run_wall.png", (60, 60, 60))
+IMG_HIDE = get_image("Walls/hide_wall.png", (40, 80, 40))
+IMG_LOCKER = get_image("Walls/locker.png", (150, 150, 150))
 
 # --- AUDIO CONFIGURATION ---
 pygame.mixer.init()
@@ -99,6 +118,7 @@ def get_sound(filename, volume_key):
         pass
     return None
 
+# --- SOUND EFFECTS ---
 SND_WALK = get_sound("footstep.wav", "footstep")
 SND_AMBIENT = get_sound("ambient_suspense.wav", "ambient")
 SND_LOCKER_OPEN = get_sound("locker_open.wav", "locker_open")
@@ -108,9 +128,15 @@ SND_BATTERY = get_sound("battery_pickup.wav", "battery_pickup")
 SND_FL_ON = get_sound("flashlight_on.wav", "flashlight")
 SND_FL_OFF = get_sound("flashlight_off.wav", "flashlight")
 SND_BREATH = get_sound("breathing.wav", "breathing")
+
+# --- ENEMY SOUNDS ---
 SND_CHASE = get_sound("chase_music.wav", "chase")
-SND_ENEMY_NEAR = get_sound("enemy_near.wav", "enemy_near")
-SND_ENEMY_SPOTTED = get_sound("enemy_spotted.wav", "enemy_spotted")
+SND_STALKER_NEAR = get_sound("stalker_near.wav", "enemy_near")
+SND_STALKER_SPOTTED = get_sound("stalker_spotted.wav", "enemy_spotted")
+SND_GHOST_NEAR = get_sound("ghost_near.wav", "enemy_near")
+SND_GHOST_SPOTTED = get_sound("ghost_spotted.wav", "enemy_spotted")
+SND_SHADOW_NEAR = get_sound("shadow_near.wav", "enemy_near")
+SND_SHADOW_SPOTTED = get_sound("shadow_spotted.wav", "enemy_spotted")
 
 CH_WALK = pygame.mixer.Channel(0)
 CH_AMBIENT = pygame.mixer.Channel(1)
@@ -118,10 +144,10 @@ CH_PROXIMITY = pygame.mixer.Channel(2)
 CH_CHASE = pygame.mixer.Channel(3)
 CH_ENEMY_PROX = pygame.mixer.Channel(4) 
 
+# --- MENU MUSIC ---
 MENU_MUSIC_PATH = os.path.join(BASE_PATH, ASSET_DIR, "sounds", "menu_theme.mp3")
 
 # --- CLASSES ---
-
 class Battery:
     def __init__(self):
         self.respawn_timer = 0
@@ -141,6 +167,7 @@ class Battery:
                 new_x, new_y = tx * TILE_SIZE + 50, ty * TILE_SIZE + 50
                 dist_to_player = math.hypot(new_x - player.x, new_y - player.y)
                 too_close_to_battery = False
+           
                 for b in batteries:
                     if b != self and not b.picked_up:
                         if math.hypot(new_x - b.x, new_y - b.y) < 400:
@@ -159,19 +186,23 @@ class Key:
 class Locker:
     def __init__(self, tile_x, tile_y, current_map):
         self.tile_x, self.tile_y = tile_x, tile_y
-        self.width, self.depth = 60, 15 
+        self.width, self.depth = 60, 20 
         self.x = (tile_x * TILE_SIZE) + (TILE_SIZE - self.width) // 2
-        if tile_y > 0 and current_map[tile_y-1][tile_x] == 1: self.y = (tile_y * TILE_SIZE) + 1
-        elif tile_y < MAP_SIZE - 1 and current_map[tile_y+1][tile_x] == 1: self.y = (tile_y * TILE_SIZE) + TILE_SIZE - self.depth - 1
-        elif tile_x > 0 and current_map[tile_y][tile_x-1] == 1: 
-            self.width, self.depth = 15, 60
+
+        if tile_y > 0 and current_map[tile_y-1][tile_x] in [1, 5]: 
+            self.y = (tile_y * TILE_SIZE) + 1
+        elif tile_y < MAP_SIZE - 1 and current_map[tile_y+1][tile_x] in [1, 5]: 
+            self.y = (tile_y * TILE_SIZE) + TILE_SIZE - self.depth - 1
+        elif tile_x > 0 and current_map[tile_y][tile_x-1] in [1, 5]: 
+            self.width, self.depth = 20, 60
             self.x = (tile_x * TILE_SIZE) + 1
             self.y = (tile_y * TILE_SIZE) + (TILE_SIZE - self.depth) // 2
-        elif tile_x < MAP_SIZE - 1 and current_map[tile_y][tile_x+1] == 1: 
-            self.width, self.depth = 15, 60
+        elif tile_x < MAP_SIZE - 1 and current_map[tile_y][tile_x+1] in [1, 5]: 
+            self.width, self.depth = 20, 60
             self.x = (tile_x * TILE_SIZE) + TILE_SIZE - self.width - 1
             self.y = (tile_y * TILE_SIZE) + (TILE_SIZE - self.depth) // 2
-        else: self.y = (tile_y * TILE_SIZE) + (TILE_SIZE - self.depth) // 2
+        else:
+            self.y = (tile_y * TILE_SIZE) + (TILE_SIZE - self.depth) // 2
         self.rect = pygame.Rect(self.x, self.y, self.width, self.depth)
 
 class Player:
@@ -194,13 +225,15 @@ class Player:
         if keys[K_d] or keys[K_RIGHT]: dx, dy = -self.speed * sin_a, self.speed * cos_a
         if (dx != 0 or dy != 0) and not CH_WALK.get_busy():
             if SND_WALK: CH_WALK.play(SND_WALK)
-        margin = 28
+
+        margin = 15
+
         tx_next = int((self.x + dx + (margin if dx>0 else -margin)) // TILE_SIZE)
         ty_next = int((self.y + dy + (margin if dy>0 else -margin)) // TILE_SIZE)
         can_move_x = world_map[int(self.y // TILE_SIZE)][tx_next] == 0
         can_move_y = world_map[ty_next][int(self.x // TILE_SIZE)] == 0
-        new_rect_x = pygame.Rect(self.x + dx - 10, self.y - 10, 20, 20)
-        new_rect_y = pygame.Rect(self.x - 10, self.y + dy - 10, 20, 20)
+        new_rect_x = pygame.Rect(self.x + dx - 15, self.y - 15, 30, 30)
+        new_rect_y = pygame.Rect(self.x - 15, self.y + dy - 15, 30, 30)
         for lock in lockers_list:
             if new_rect_x.colliderect(lock.rect): can_move_x = False
             if new_rect_y.colliderect(lock.rect): can_move_y = False
@@ -217,7 +250,7 @@ class Player:
         for b in batteries:
             if not b.picked_up and math.hypot(self.x - b.x, self.y - b.y) < 60:
                 if SND_BATTERY: SND_BATTERY.play()
-                b.picked_up, flashlight_battery = True, min(1000, flashlight_battery + 350)
+                b.picked_up, flashlight_battery = True, min(1000, flashlight_battery + 1000)
                 b.respawn_timer = BATTERY_RESPAWN_DELAY
                 return "PICKED_BATTERY"
         tx, ty = int(self.x // TILE_SIZE), int(self.y // TILE_SIZE)
@@ -236,38 +269,56 @@ class Player:
         return None
 
 class Enemy:
-    def __init__(self, x, y):
+    def __init__(self, x, y, name, sprites, sounds):
         self.start_x, self.start_y = x, y
+        self.name = name
+        self.sprites = sprites
+        self.sounds = sounds 
         self.last_dx, self.last_dy = 0, 0
+        self.chase_timer = 0
+        self.chase_persistence = 180 # Approx 3 seconds at 60 FPS
         self.reset()
+
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 0.8, 1.2
+        self.speed_wander, self.speed_chase = 0, 0
         self.detection_range, self.is_chasing = 600, False
         self.wander_angle = random.uniform(0, math.pi * 2)
+        self.chase_timer = 0
+
     def update(self, player):
         dx_p, dy_p = player.x - self.x, player.y - self.y
         dist = math.hypot(dx_p, dy_p)
-        can_see = False
+        
+        # Determine if player is currently visible
+        currently_seen = False
         if not player.is_hiding and flashlight_on and dist < self.detection_range:
             angle_to_player = math.atan2(dy_p, dx_p)
-            can_see = True
+            currently_seen = True
             for d in range(0, int(dist), 25):
                 tx, ty = int((self.x + d * math.cos(angle_to_player)) // TILE_SIZE), int((self.y + d * math.sin(angle_to_player)) // TILE_SIZE)
                 if 0 <= tx < MAP_SIZE and 0 <= ty < MAP_SIZE:
                     if world_map[ty][tx] in [1, 3]: 
-                        can_see = False
+                        currently_seen = False
                         break
+
         ex, ey = 0, 0
-        if can_see:
-            if not self.is_chasing: 
-                if SND_ENEMY_SPOTTED: SND_ENEMY_SPOTTED.play()
+        if currently_seen:
+            if not self.is_chasing:
+                if self.sounds['spotted']: self.sounds['spotted'].play()
             self.is_chasing = True
+            self.chase_timer = self.chase_persistence
+        elif self.chase_timer > 0:
+            self.chase_timer -= 1
+        else:
+            self.is_chasing = False
+
+        if self.is_chasing:
             angle = math.atan2(dy_p, dx_p)
             ex, ey = self.speed_chase * math.cos(angle), self.speed_chase * math.sin(angle)
         else:
-            self.is_chasing = False
             ex, ey = self.speed_wander * math.cos(self.wander_angle), self.speed_wander * math.sin(self.wander_angle)
+
         margin = 15
         moved_x, moved_y = False, False
         if world_map[int(self.y // TILE_SIZE)][int((self.x + ex + (margin if ex>0 else -margin)) // TILE_SIZE)] == 0: 
@@ -284,28 +335,31 @@ class Enemy:
 
 world_map = [
     [1,1,1,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,1],
-    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
-    [1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,2,0,1],
-    [1,0,1,1,0,1,0,1,1,1,1,1,1,1,0,1,1,1,1,0,1],
-    [1,0,1,2,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,0,1],
-    [1,0,1,1,1,1,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,1],
-    [1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,2,1,1],
-    [1,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,1,0,1,0,1,0,1,1,2,1,1,0,1,1,1,1,1,0,1],
-    [1,0,1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,0,0,1],
-    [1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1],
-    [1,0,0,0,2,1,0,0,0,0,1,0,0,0,0,0,1,2,1,0,1],
-    [1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,0,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1],
-    [1,0,1,1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1],
-    [1,0,0,0,0,2,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1],
-    [1,2,0,0,0,0,0,0,2,1,0,1,2,0,0,0,0,0,0,2,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    [5,1,1,1,1,1,1,1,1,5,0,5,1,1,1,1,1,1,1,1,5],
+    [5,5,5,5,5,5,5,5,5,5,0,5,5,5,5,5,5,5,5,5,5],
+    [5,0,0,0,0,5,0,0,0,0,0,0,0,0,0,0,0,0,2,0,5],
+    [5,0,5,5,0,5,0,5,5,5,5,5,5,5,0,5,5,5,5,0,5],
+    [5,0,5,2,0,5,0,0,0,5,0,0,0,5,0,5,0,0,0,0,5],
+    [5,0,5,5,5,5,5,5,0,5,0,5,0,5,0,5,0,5,5,5,5],
+    [5,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,5,0,0,5],
+    [5,5,5,5,5,0,5,5,5,5,5,5,5,5,5,5,0,5,2,5,5],
+    [5,0,0,0,5,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
+    [5,0,5,0,5,0,5,0,5,5,2,5,5,0,5,5,5,5,5,0,5],
+    [5,0,5,0,0,0,0,0,5,0,0,0,5,0,5,0,0,0,0,0,5],
+    [5,0,5,5,5,5,5,5,5,0,5,0,5,0,5,0,5,5,5,0,5],
+    [5,0,0,0,2,5,0,0,0,0,5,0,0,0,0,0,5,2,5,0,5],
+    [5,5,5,0,5,5,0,5,5,5,6,5,5,5,5,0,5,0,5,0,5],
+    [5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
+    [5,0,5,5,5,5,7,5,5,5,0,5,0,5,5,5,5,5,5,0,5],
+    [5,0,0,0,0,0,2,0,5,5,0,5,0,0,0,0,0,0,0,0,5],
+    [5,5,5,5,5,5,5,5,5,5,0,4,5,5,5,5,5,5,5,5,5],
+    [1,1,1,1,1,1,1,1,1,5,0,5,1,1,1,1,1,1,1,1,5],
+    [1,1,1,1,1,1,1,1,1,1,5,1,1,1,1,1,1,1,1,1,1]
 ]
 
+# 1 = Wall, 0 = Floor, 2 = Locker, 3 = Exit, 4 = Instruction Sign, 5 = Default Wall Type, 6 = Run Wall, 7 = Hide Wall
+
+# --- LOCKER SETUP ---
 lockers_list, locker_lookup = [], {}
 for row_idx, row in enumerate(world_map):
     for col_idx, tile in enumerate(row):
@@ -313,10 +367,24 @@ for row_idx, row in enumerate(world_map):
             l = Locker(col_idx, row_idx, world_map)
             lockers_list.append(l)
             locker_lookup[(col_idx, row_idx)] = l
-            world_map[row_idx][col_idx] = 0 # FIXED: Only set locker tile to 0
+            world_map[row_idx][col_idx] = 0
 
+# --- PLAYER & ENEMY SETUP ---
 player = Player(1050, 1950)
-enemies = [Enemy(150, 350), Enemy(1950, 350), Enemy(1050, 950)]
+
+enemies = [
+    Enemy(150, 350, "Ghost", 
+          {'front': SPRITE_GHOST_F, 'back': SPRITE_GHOST_B}, 
+          {'near': SND_GHOST_NEAR, 'spotted': SND_GHOST_SPOTTED}),
+    Enemy(1950, 350, "Stalker", 
+          {'front': SPRITE_STALKER_F, 'back': SPRITE_STALKER_B}, 
+          {'near': SND_STALKER_NEAR, 'spotted': SND_STALKER_SPOTTED}),
+    Enemy(1050, 950, "Shadow", 
+          {'front': SPRITE_SHADOW_F, 'back': SPRITE_SHADOW_B}, 
+          {'near': None, 'spotted': None}) 
+]
+
+# --- KEY & BATTERY SETUP ---
 batteries = []
 for _ in range(MAX_BATTERIES):
     batteries.append(Battery())
@@ -340,6 +408,7 @@ font_lg = pygame.font.Font(None, 74)
 
 # --- ENGINE FUNCTIONS ---
 
+# --- RAYCASTING FUNCTION ---
 def cast_ray(px, py, pa, ra):
     cos_a, sin_a = math.cos(ra), math.sin(ra)
     x_map, y_map = int(px // TILE_SIZE), int(py // TILE_SIZE)
@@ -355,21 +424,23 @@ def cast_ray(px, py, pa, ra):
             if not (player.is_hiding and player.current_locker == lock):
                 for i in range(0, TILE_SIZE, 5): 
                     rx, ry = px + cos_a * (dist_travelled + i), py + sin_a * (dist_travelled + i)
-                    if lock.rect.collidepoint(rx, ry): return (dist_travelled+i) * math.cos(ra-pa), (x_map,y_map), 0, (dist_travelled+i), 2
+                    if lock.rect.collidepoint(rx, ry): 
+                        return (dist_travelled+i) * math.cos(ra-pa), (x_map,y_map), 0, (dist_travelled+i), 2
         if side_dist_x < side_dist_y: dist_travelled, side_dist_x, x_map, side = side_dist_x * TILE_SIZE, side_dist_x + delta_dist_x, x_map + step_x, 0
         else: dist_travelled, side_dist_y, y_map, side = side_dist_y * TILE_SIZE, side_dist_y + delta_dist_y, y_map + step_y, 1
         if 0 <= x_map < MAP_SIZE and 0 <= y_map < MAP_SIZE:
-            if world_map[y_map][x_map] in [1, 3]: wall_hit, tile_type = True, world_map[y_map][x_map]
+            if world_map[y_map][x_map] in [1, 2, 3, 4, 5, 6 ,7]: wall_hit, tile_type = True, world_map[y_map][x_map]
         else: break
     wall_dist = (side_dist_x - delta_dist_x) if side == 0 else (side_dist_y - delta_dist_y)
     return wall_dist * TILE_SIZE * math.cos(ra - pa), (x_map, y_map), side, wall_dist * TILE_SIZE, tile_type
 
+# --- SPRITE RENDERING FUNCTION ---
 def draw_sprites(surface):
     all_sprites = []
     for e in enemies:
         v_player_x, v_player_y = player.x - e.x, player.y - e.y
         dot_to_player = (e.last_dx * v_player_x) + (e.last_dy * v_player_y)
-        img = SPRITE_ENEMY_FRONT if dot_to_player >= 0 else SPRITE_ENEMY_BACK
+        img = e.sprites['front'] if dot_to_player >= 0 else e.sprites['back']
         all_sprites.append({'x': e.x, 'y': e.y, 'img': img, 'type': 'E'})
     for b in batteries:
         if not b.picked_up: all_sprites.append({'x': b.x, 'y': b.y, 'img': SPRITE_BATTERY, 'type': 'B'})
@@ -388,7 +459,11 @@ def draw_sprites(surface):
             proj_dist = dist * math.cos(theta)
             wall_h = 30000 / (proj_dist + 0.0001)
             middle_x = INTERNAL_WIDTH / 2 + theta * INTERNAL_WIDTH / RAD_FOV
-            lf = max(0, 1 - (dist/400)**2) if flashlight_on else 0
+            if flashlight_on and abs(theta) < math.radians(25):
+                edge_softness = 1.0 - (abs(theta) / math.radians(25))
+                lf = max(0, (1 - (dist/400)**2) * edge_softness)
+            else:
+                lf = 0
             it = int(255 * lf)
             if s['type'] == 'E':
                 s_width, s_height = int(wall_h * 1.0), int(wall_h * 1.4)
@@ -402,11 +477,14 @@ def draw_sprites(surface):
                 scaled_img.fill((it, it, it), special_flags=pygame.BLEND_RGB_MULT)
                 surface.blit(scaled_img, (middle_x - s_width/2, y_pos))
 
+# --- AUDIO MANAGEMENT FUNCTION ---
 def update_audio(state):
     if enemies:
-        closest_dist = min([math.hypot(player.x - e.x, player.y - e.y) for e in enemies])
+        closest_enemy = min(enemies, key=lambda e: math.hypot(player.x - e.x, player.y - e.y))
+        closest_dist = math.hypot(player.x - closest_enemy.x, player.y - closest_enemy.y)
     else:
         closest_dist = 9999
+        closest_enemy = None
 
     any_chasing = any(e.is_chasing for e in enemies)
     
@@ -418,10 +496,17 @@ def update_audio(state):
             CH_ENEMY_PROX.fadeout(500) 
         else:
             CH_PROXIMITY.fadeout(500) 
-            if not any_chasing:
-                if SND_ENEMY_NEAR and not CH_ENEMY_PROX.get_busy():
-                    CH_ENEMY_PROX.play(SND_ENEMY_NEAR, loops=-1)
-                CH_ENEMY_PROX.set_volume(sound_volumes.get("enemy_near", 0.5) * master_volume)
+            if not any_chasing and closest_enemy:
+                unique_near_snd = closest_enemy.sounds.get('near')
+                if unique_near_snd and not CH_ENEMY_PROX.get_busy():
+                    CH_ENEMY_PROX.play(unique_near_snd, loops=-1)
+                dx, dy = closest_enemy.x - player.x, closest_enemy.y - player.y
+                rel_angle = math.atan2(dy, dx) - player.angle
+                pan = math.sin(rel_angle) 
+                base_vol = sound_volumes.get("enemy_near", 0.5) * master_volume
+                l_vol = base_vol * (0.5 - pan * 0.5)
+                r_vol = base_vol * (0.5 + pan * 0.5)
+                CH_ENEMY_PROX.set_volume(l_vol, r_vol)
             else:
                 CH_ENEMY_PROX.fadeout(500) 
     else:
@@ -431,13 +516,42 @@ def update_audio(state):
     if any_chasing and not player.is_hiding and state == "GAME":
         if SND_CHASE and not CH_CHASE.get_busy(): 
             CH_CHASE.play(SND_CHASE, loops=-1)
+        if closest_enemy:
+            dx, dy = closest_enemy.x - player.x, closest_enemy.y - player.y
+            rel_angle = math.atan2(dy, dx) - player.angle
+            pan = math.sin(rel_angle)
+            base_vol = sound_volumes.get("chase", 0.5) * master_volume
+            CH_CHASE.set_volume(base_vol * (0.5 - pan * 0.5), base_vol * (0.5 + pan * 0.5))
     else: 
         CH_CHASE.fadeout(1000)
 
-# --- MAIN LOOP ---
+# --- HUD RENDERING FUNCTION ---
+def draw_hud(surface):
+    if player.is_hiding:
+        return
+    hud_img = SPRITE_FLASHLIGHT_ON if flashlight_on else SPRITE_FLASHLIGHT_OFF
 
+# --- BOBBING LOGIC ---
+    bob_offset = 0
+    keys = pygame.key.get_pressed()
+    is_moving = any([keys[K_w], keys[K_s], keys[K_a], keys[K_d], 
+                     keys[K_UP], keys[K_DOWN], keys[K_LEFT], keys[K_RIGHT]])
+    
+    if is_moving:
+        bob_offset = math.sin(pygame.time.get_ticks() * 0.01) * 15
+    
+    height_ratio = 300 / hud_img.get_height()
+    width = int(hud_img.get_width() * height_ratio)
+    scaled_hud = pygame.transform.scale(hud_img, (width, 300))
+    
+    hud_x = (INTERNAL_WIDTH // 2) - (width // 2)
+    hud_y = (INTERNAL_HEIGHT - 280) + bob_offset
+    
+    surface.blit(scaled_hud, (hud_x, hud_y))
+
+# --- MAIN LOOP ---
 def main():
-    global flashlight_on, flashlight_battery, is_fullscreen, screen, mouse_sensitivity, z_buffer, keys_list
+    global flashlight_on, flashlight_battery, is_fullscreen, screen, mouse_sensitivity, z_buffer, keys_list, jumpscare_timer, killer_sprite
     
     state = "MENU"
     previous_state = "MENU"
@@ -445,7 +559,12 @@ def main():
     running = True
     dragging = False
 
-    # FIXED: Added safety for music loading
+    flashlight_mask = pygame.Surface((INTERNAL_WIDTH, INTERNAL_HEIGHT), pygame.SRCALPHA)
+    flashlight_mask.fill((0, 0, 0, 255)) 
+    for r in range(280, 0, -1):
+        alpha = int(255 * (r / 280))
+        pygame.draw.circle(flashlight_mask, (0, 0, 0, alpha), (INTERNAL_WIDTH//2, INTERNAL_HEIGHT//2), r)
+
     try:
         if os.path.exists(MENU_MUSIC_PATH):
             pygame.mixer.music.load(MENU_MUSIC_PATH)
@@ -474,7 +593,7 @@ def main():
                             if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, loops=-1)
                             pygame.mouse.set_visible(False)
                             pygame.event.set_grab(True)
-                            pygame.mouse.get_rel() # FIXED: Clear rel movement
+                            pygame.mouse.get_rel() 
                         elif 310 < imy < 350: 
                             previous_state = "MENU"
                             state = "OPTIONS"
@@ -507,7 +626,7 @@ def main():
                         if 230 < imy < 270: 
                             player.reset(1050, 1950)
                             for e in enemies: e.reset()
-                            keys_list = generate_keys()
+                            keys_list = generate_keys() 
                             for b in batteries: b.respawn()
                             flashlight_battery, flashlight_on, state = 1000, True, "GAME"
                             pygame.mouse.set_visible(False)
@@ -533,16 +652,13 @@ def main():
                     pygame.event.set_grab(True)
                     pygame.mouse.get_rel()
                     if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, -1)
-             
-            if event.type == MOUSEBUTTONUP: dragging = False
             
+            if event.type == MOUSEBUTTONUP: dragging = False
             if event.type == KEYDOWN:
                 if event.key == K_BACKQUOTE:
                     is_fullscreen = not is_fullscreen
-                    if is_fullscreen:
-                        screen = pygame.display.set_mode((0, 0), flags | FULLSCREEN)
-                    else:
-                        screen = pygame.display.set_mode((INTERNAL_WIDTH, INTERNAL_HEIGHT), flags)
+                    if is_fullscreen: screen = pygame.display.set_mode((0, 0), flags | FULLSCREEN)
+                    else: screen = pygame.display.set_mode((INTERNAL_WIDTH, INTERNAL_HEIGHT), flags)
                 
                 if event.key == K_ESCAPE and state == "GAME": 
                     state = "PAUSE"
@@ -558,7 +674,6 @@ def main():
                     pygame.mouse.get_rel()
                     pygame.mixer.music.stop()
                     if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, loops=-1)
-    
                 if state == "GAME":
                     if event.key == K_f: 
                         flashlight_on = not flashlight_on
@@ -580,7 +695,10 @@ def main():
             for e in enemies:
                 d = e.update(player)
                 if d < 45 and not player.is_hiding:
-                    state = "DEAD"
+                    state = "JUMPSCARE"
+                    jumpscare_timer = 45
+                    killer_sprite = e.sprites['front']
+                    if e.sounds['spotted']: e.sounds['spotted'].play()
                     pygame.mouse.set_visible(True)
                     pygame.event.set_grab(False)
                     CH_AMBIENT.stop()
@@ -590,26 +708,104 @@ def main():
                 if math.hypot(player.x - k.x, player.y - k.y) < 45:
                     if SND_KEY: SND_KEY.play()
                     k.picked_up, player.keys_collected = True, player.keys_collected + 1
-    
             if flashlight_on:
                 flashlight_battery -= 0.15
                 if flashlight_battery <= 0: flashlight_battery, flashlight_on = 0, False
-            
             update_audio(state)
 
             game_surface.fill(BLACK)
+
+            if flashlight_on:
+                pygame.draw.rect(game_surface, (0 ,0 ,0), (0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT // 2))
+                pygame.draw.rect(game_surface, (0, 0, 0), (0, INTERNAL_HEIGHT // 2, INTERNAL_WIDTH, INTERNAL_HEIGHT // 2))
+            
             sa = player.angle - HALF_FOV
             for r in range(NUM_RAYS):
                 ra = sa + r * RAD_FOV / NUM_RAYS
                 d, t, side, rd, tt = cast_ray(player.x, player.y, player.angle, ra)
                 z_buffer[r] = rd
-                h = 42000 / (max(1, d) + 0.0001) # FIXED: Safety max
-                it = 255 / (1 + d*d*0.00003)
-                bc = (it*0.35, it*0.35, it*0.35) if tt == 3 else (LOCKER_COL[0]*it/255, LOCKER_COL[1]*it/255, LOCKER_COL[2]*it/255) if tt == 2 else (it*0.4*(1 if side==0 else 0.7), it*0.2*(1 if side==0 else 0.7), it*0.2*(1 if side==0 else 0.7))
-                lf = max(0, 1 - (d/380)**2) if flashlight_on else 0
-                pygame.draw.rect(game_surface, tuple(int(c * lf) for c in bc), (int(r * SCALE), 270 - h/2, math.ceil(SCALE)+1, h))
+
+                angle_diff = ra - player.angle
+                while angle_diff > math.pi: angle_diff -= 2 * math.pi
+                while angle_diff < -math.pi: angle_diff += 2 * math.pi
+
+                cone_angle = math.radians(50)
+
+                if flashlight_on and abs(angle_diff) < cone_angle:
+                    edge_softness = 1.0 - (abs(angle_diff) / cone_angle)
+                    lf = max(0, (1 - (d/380)**2) * edge_softness)
+                else:
+                    lf = 0
+                
+                h = 42000 / (max(1, d) + 0.0001)
+
+                if d >= 380:
+                    lf = 0
+                
+                light_color = int(255 * lf)
+
+                target_img = None
+                if tt == 4: target_img = IMG_INSTRUCTIONS
+                elif tt == 5: target_img = IMG_DEFAULT
+                elif tt == 6: target_img = IMG_RUN
+                elif tt == 7: target_img = IMG_HIDE
+                elif tt == 2: target_img = IMG_LOCKER
+
+                if target_img:
+                    if side == 1:
+                        wall_x = (player.x + rd * math.cos(ra)) % TILE_SIZE
+                    else:
+                        wall_x = (player.y + rd * math.sin(ra)) % TILE_SIZE
+                    
+                    tex_x = int(wall_x * (target_img.get_width() / TILE_SIZE))
+                    column = target_img.subsurface(tex_x, 0, 1, target_img.get_height())
+                    
+                    scaled_col = pygame.transform.scale(column, (math.ceil(SCALE) + 1, int(h)))
+                    scaled_col.fill((light_color, light_color, light_color), special_flags=pygame.BLEND_RGB_MULT)
+                    
+                    game_surface.blit(scaled_col, (int(r * SCALE), 270 - h/2))
+                else:
+                    it = 255 / (1 + d*d*0.00003)
+                    bc = (it*0.35, it*0.35, it*0.35) if tt == 3 else (it*0.4, it*0.4, it*0.4) if side == 1 else (it*0.2, it*0.2, it*0.2)
+                    pygame.draw.rect(game_surface, tuple(int(c * lf) for c in bc), (int(r * SCALE), 270 - h/2, math.ceil(SCALE)+1, h))
+
             draw_sprites(game_surface)
-            
+
+            if flashlight_on:
+                game_surface.blit(flashlight_mask, (0, 0))
+
+            draw_hud(game_surface)
+
+# --- TEXTURE MAPPING & SPECIAL TILES ---
+            if target_img:
+                wall_x = (player.x + rd * math.cos(ra)) % TILE_SIZE if side == 1 else (player.y + rd * math.sin(ra)) % TILE_SIZE
+                cos_a = math.cos(ra)
+                sin_a = math.sin(ra)
+
+                if (side == 0 and cos_a > 0) or (side == 1 and sin_a < 0):
+                    wall_x = TILE_SIZE - wall_x - 1
+                tex_x = int(wall_x * (target_img.get_width() / TILE_SIZE))
+                tex_x = max(0, min(tex_x, target_img.get_width() - 1))
+                    
+                column = target_img.subsurface(tex_x, 0, 1, target_img.get_height())
+                
+                scaled_col = pygame.transform.scale(column, (math.ceil(SCALE) + 1, int(h)))
+                
+                light_color = int(255 * lf)
+                scaled_col.fill((light_color, light_color, light_color), special_flags=pygame.BLEND_RGB_MULT)
+                
+                game_surface.blit(scaled_col, (int(r * SCALE), 270 - h/2))
+            else:
+                bc = (it*0.35, it*0.35, it*0.35) if tt == 3 else (it*0.4, it*0.4, it*0.4) 
+                if tt == 2:
+                    bc = LOCKER_COL 
+                elif tt == 3:
+                    bc = (it*0.35, it*0.35, it*0.35)
+                else:
+                    bc = (it*0.4, it*0.4, it*0.4) if side == 1 else (it*0.2, it*0.2, it*0.2)
+                
+                pygame.draw.rect(game_surface, tuple(int(c * lf) for c in bc), (int(r * SCALE), 270 - h/2, math.ceil(SCALE)+1, h))
+
             if player.is_hiding:
                 vignette = pygame.Surface((960, 540), pygame.SRCALPHA)
                 pygame.draw.rect(vignette, (0,0,0,200), (0,0,960,120))
@@ -629,10 +825,8 @@ def main():
                                 near_door = True
                                 break
                 if near_door:
-                    if player.keys_collected < 15:
-                        current_prompt = font_sm.render(f"COLLECT ALL 15 KEYS ({player.keys_collected}/15)", True, RED)
-                    else:
-                        current_prompt = font_sm.render("[E] ESCAPE", True, GREEN)
+                    if player.keys_collected < 15: current_prompt = font_sm.render(f"COLLECT ALL 15 KEYS ({player.keys_collected}/15)", True, RED)
+                    else: current_prompt = font_sm.render("[E] ESCAPE", True, GREEN)
                 if not current_prompt:
                     for b in batteries:
                         if not b.picked_up and math.hypot(player.x - b.x, player.y - b.y) < 70:
@@ -643,13 +837,20 @@ def main():
                         if math.hypot(player.x - (lock.x + lock.width/2), player.y - (lock.y + lock.depth/2)) < 75:
                             current_prompt = font_sm.render("[E] HIDE IN LOCKER", True, WHITE)
                             break
-                if current_prompt:
-                    game_surface.blit(current_prompt, current_prompt.get_rect(center=(480, 480)))
+                if current_prompt: game_surface.blit(current_prompt, current_prompt.get_rect(center=(480, 480)))
             
             pygame.draw.circle(game_surface, YELLOW if flashlight_on else (30,30,30), (50,50), 20)
             pygame.draw.rect(game_surface, GREEN if flashlight_battery > 250 else RED, (30,80, max(0, int(flashlight_battery/10)), 10))
             game_surface.blit(font_sm.render(f"KEYS: {player.keys_collected}/15", True, SILVER if player.keys_collected < 15 else GREEN), (30, 100))
          
+        elif state == "JUMPSCARE":
+            if killer_sprite:
+                js_img = pygame.transform.scale(killer_sprite, (INTERNAL_HEIGHT, INTERNAL_HEIGHT))
+                game_surface.blit(js_img, js_img.get_rect(center=(INTERNAL_WIDTH//2, INTERNAL_HEIGHT//2)))
+            jumpscare_timer -= 1
+            if jumpscare_timer <= 0:
+                state = "DEAD"
+
         elif state == "MENU":
             game_surface.fill(BLACK)
             title = font_lg.render("HIDE & SEEK", True, RED)
@@ -679,8 +880,7 @@ def main():
             pygame.draw.circle(game_surface, WHITE, (int(sx), 270), 10)
             back = font_sm.render("BACK", True, WHITE if (380 < imx < 580 and 340 < imy < 380) else GRAY)
             game_surface.blit(back, back.get_rect(center=(480, 360)))
-            if dragging: 
-                mouse_sensitivity = max(0.0005, min(0.01, 0.0005 + ((imx - 380) / 200) * 0.0095))
+            if dragging: mouse_sensitivity = max(0.0005, min(0.01, 0.0005 + ((imx - 380) / 200) * 0.0095))
 
         elif state == "DEAD":
             game_surface.fill(BLACK)
