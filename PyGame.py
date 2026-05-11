@@ -34,13 +34,12 @@ sound_volumes = {
     "ambient": 0.4,
     "locker_open": 0.8,
     "locker_close": 0.8,
-    "key_pickup": 0.7,
-    "battery_pickup": 0.3,
+    "key_pickup": 1.0,
+    "battery_pickup": 0.2,
     "flashlight": 1.0,
-    "breathing": 0.6,
-    "chase": 0.5,
+    "breathing": 0.8,
     "enemy_near": 0.5,
-    "enemy_spotted": 0.8
+    "enemy_collision": 1.0,
 }
 
 # Global dynamic variables
@@ -50,7 +49,11 @@ flashlight_battery = 1000
 is_fullscreen = False
 z_buffer = [MAX_DEPTH] * NUM_RAYS
 jumpscare_timer = 0
-killer_sprite = None
+try:
+    killer_sprite = pygame.image.load("assets/enemy_jumpscare.png").convert_alpha()
+except:
+    killer_sprite = pygame.Surface((INTERNAL_WIDTH, INTERNAL_HEIGHT))
+    killer_sprite.fill((150, 0, 0))
 
 # Colors
 BLACK = (0, 0, 0)
@@ -85,10 +88,6 @@ def get_image(filename, fallback_col):
 # --- SPRITE CONFIGURATION ---
 
 # --- ENEMY SPRITES ---
-SPRITE_GHOST_F = get_image("Sprites (Final)/ghost_front.png", WHITE)
-SPRITE_GHOST_B = get_image("Sprites (Final)/ghost_back.png", GRAY)
-SPRITE_STALKER_F = get_image("Sprites (Final)/stalker_front.png", RED)
-SPRITE_STALKER_B = get_image("Sprites (Final)/stalker_back.png", (100, 0, 0))
 SPRITE_SHADOW_F = get_image("Sprites (Final)/shadow_front.png", (30, 30, 30))
 SPRITE_SHADOW_B = get_image("Sprites (Final)/shadow_back.png", BLACK)
 # --- ITEM SPRITES ---
@@ -103,6 +102,11 @@ IMG_DEFAULT = get_image("Walls/default_wall.png", (150, 0, 0))
 IMG_RUN = get_image("Walls/run_wall.png", (60, 60, 60))
 IMG_HIDE = get_image("Walls/hide_wall.png", (40, 80, 40))
 IMG_LOCKER = get_image("Walls/locker.png", (150, 150, 150))
+# --- TITLE SCREEN ---
+flashlight_menu_on = pygame.image.load("flashlight_menu_on.png").convert_alpha()
+flashlight_menu_on = pygame.transform.scale(flashlight_menu_on, (INTERNAL_WIDTH, INTERNAL_HEIGHT))
+flashlight_menu_off = pygame.image.load("flashlight_menu_off.png").convert_alpha()
+flashlight_menu_off = pygame.transform.scale(flashlight_menu_off, (INTERNAL_WIDTH, INTERNAL_HEIGHT))
 
 # --- AUDIO CONFIGURATION ---
 pygame.mixer.init()
@@ -130,13 +134,8 @@ SND_FL_OFF = get_sound("flashlight_off.wav", "flashlight")
 SND_BREATH = get_sound("breathing.wav", "breathing")
 
 # --- ENEMY SOUNDS ---
-SND_CHASE = get_sound("chase_music.wav", "chase")
-SND_STALKER_NEAR = get_sound("stalker_near.wav", "enemy_near")
-SND_STALKER_SPOTTED = get_sound("stalker_spotted.wav", "enemy_spotted")
-SND_GHOST_NEAR = get_sound("ghost_near.wav", "enemy_near")
-SND_GHOST_SPOTTED = get_sound("ghost_spotted.wav", "enemy_spotted")
-SND_SHADOW_NEAR = get_sound("shadow_near.wav", "enemy_near")
-SND_SHADOW_SPOTTED = get_sound("shadow_spotted.wav", "enemy_spotted")
+SND_ENEMY_NEAR = get_sound("enemy_near.wav", "enemy_near")
+SND_ENEMY_COLLISION = get_sound("enemy_collision.wav", "enemy_spotted")
 
 CH_WALK = pygame.mixer.Channel(0)
 CH_AMBIENT = pygame.mixer.Channel(1)
@@ -276,12 +275,12 @@ class Enemy:
         self.sounds = sounds 
         self.last_dx, self.last_dy = 0, 0
         self.chase_timer = 0
-        self.chase_persistence = 180 # Approx 3 seconds at 60 FPS
+        self.chase_persistence = 180
         self.reset()
 
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 0, 0
+        self.speed_wander, self.speed_chase = 1, 1.5
         self.detection_range, self.is_chasing = 600, False
         self.wander_angle = random.uniform(0, math.pi * 2)
         self.chase_timer = 0
@@ -289,14 +288,16 @@ class Enemy:
     def update(self, player):
         dx_p, dy_p = player.x - self.x, player.y - self.y
         dist = math.hypot(dx_p, dy_p)
-        
-        # Determine if player is currently visible
+
         currently_seen = False
+
         if not player.is_hiding and flashlight_on and dist < self.detection_range:
             angle_to_player = math.atan2(dy_p, dx_p)
             currently_seen = True
+            
             for d in range(0, int(dist), 25):
-                tx, ty = int((self.x + d * math.cos(angle_to_player)) // TILE_SIZE), int((self.y + d * math.sin(angle_to_player)) // TILE_SIZE)
+                tx, ty = int((self.x + d * math.cos(angle_to_player)) // TILE_SIZE), \
+                         int((self.y + d * math.sin(angle_to_player)) // TILE_SIZE)
                 if 0 <= tx < MAP_SIZE and 0 <= ty < MAP_SIZE:
                     if world_map[ty][tx] in [1, 3]: 
                         currently_seen = False
@@ -304,10 +305,8 @@ class Enemy:
 
         ex, ey = 0, 0
         if currently_seen:
-            if not self.is_chasing:
-                if self.sounds['spotted']: self.sounds['spotted'].play()
-            self.is_chasing = True
             self.chase_timer = self.chase_persistence
+            self.is_chasing = True
         elif self.chase_timer > 0:
             self.chase_timer -= 1
         else:
@@ -317,8 +316,9 @@ class Enemy:
             angle = math.atan2(dy_p, dx_p)
             ex, ey = self.speed_chase * math.cos(angle), self.speed_chase * math.sin(angle)
         else:
-            ex, ey = self.speed_wander * math.cos(self.wander_angle), self.speed_wander * math.sin(self.wander_angle)
-
+            ex, ey = self.speed_wander * math.cos(self.wander_angle), \
+                     self.speed_wander * math.sin(self.wander_angle)
+        
         margin = 15
         moved_x, moved_y = False, False
         if world_map[int(self.y // TILE_SIZE)][int((self.x + ex + (margin if ex>0 else -margin)) // TILE_SIZE)] == 0: 
@@ -327,32 +327,34 @@ class Enemy:
         if world_map[int((self.y + ey + (margin if ey>0 else -margin)) // TILE_SIZE)][int(self.x // TILE_SIZE)] == 0: 
             self.y += ey
             moved_y = True
-        else: self.wander_angle = random.uniform(0, math.pi * 2)
+        else: 
+            self.wander_angle = random.uniform(0, math.pi * 2)
+        
         self.last_dx, self.last_dy = (ex if moved_x else 0), (ey if moved_y else 0)
-        return dist 
+        return dist
 
 # --- WORLD MAP & SETUP ---
 
 world_map = [
     [1,1,1,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,1],
     [5,1,1,1,1,1,1,1,1,5,0,5,1,1,1,1,1,1,1,1,5],
-    [5,5,5,5,5,5,5,5,5,5,0,5,5,5,5,5,5,5,5,5,5],
+    [5,5,5,5,5,5,6,5,5,5,0,5,5,5,6,5,5,5,5,7,5],
     [5,0,0,0,0,5,0,0,0,0,0,0,0,0,0,0,0,0,2,0,5],
-    [5,0,5,5,0,5,0,5,5,5,5,5,5,5,0,5,5,5,5,0,5],
+    [5,0,5,5,0,5,0,5,5,5,5,5,5,5,0,5,5,5,5,0,7],
     [5,0,5,2,0,5,0,0,0,5,0,0,0,5,0,5,0,0,0,0,5],
     [5,0,5,5,5,5,5,5,0,5,0,5,0,5,0,5,0,5,5,5,5],
     [5,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,5,0,0,5],
-    [5,5,5,5,5,0,5,5,5,5,5,5,5,5,5,5,0,5,2,5,5],
+    [5,5,5,5,5,0,5,5,5,5,5,5,5,5,5,5,0,7,2,5,5],
     [5,0,0,0,5,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
-    [5,0,5,0,5,0,5,0,5,5,2,5,5,0,5,5,5,5,5,0,5],
+    [5,0,5,0,5,0,5,0,5,5,2,5,5,0,5,5,5,5,5,0,7],
     [5,0,5,0,0,0,0,0,5,0,0,0,5,0,5,0,0,0,0,0,5],
-    [5,0,5,5,5,5,5,5,5,0,5,0,5,0,5,0,5,5,5,0,5],
+    [5,0,7,5,5,5,5,5,5,0,5,0,5,0,5,0,5,5,5,0,5],
     [5,0,0,0,2,5,0,0,0,0,5,0,0,0,0,0,5,2,5,0,5],
-    [5,5,5,0,5,5,0,5,5,5,6,5,5,5,5,0,5,0,5,0,5],
+    [5,5,5,0,5,5,0,5,5,5,6,5,5,5,5,0,5,0,5,0,6],
     [5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5],
     [5,0,5,5,5,5,7,5,5,5,0,5,0,5,5,5,5,5,5,0,5],
     [5,0,0,0,0,0,2,0,5,5,0,5,0,0,0,0,0,0,0,0,5],
-    [5,5,5,5,5,5,5,5,5,5,0,4,5,5,5,5,5,5,5,5,5],
+    [5,5,5,5,5,7,5,5,5,5,0,4,5,5,5,6,5,5,5,5,5],
     [1,1,1,1,1,1,1,1,1,5,0,5,1,1,1,1,1,1,1,1,5],
     [1,1,1,1,1,1,1,1,1,1,5,1,1,1,1,1,1,1,1,1,1]
 ]
@@ -373,15 +375,9 @@ for row_idx, row in enumerate(world_map):
 player = Player(1050, 1950)
 
 enemies = [
-    Enemy(150, 350, "Ghost", 
-          {'front': SPRITE_GHOST_F, 'back': SPRITE_GHOST_B}, 
-          {'near': SND_GHOST_NEAR, 'spotted': SND_GHOST_SPOTTED}),
-    Enemy(1950, 350, "Stalker", 
-          {'front': SPRITE_STALKER_F, 'back': SPRITE_STALKER_B}, 
-          {'near': SND_STALKER_NEAR, 'spotted': SND_STALKER_SPOTTED}),
     Enemy(1050, 950, "Shadow", 
           {'front': SPRITE_SHADOW_F, 'back': SPRITE_SHADOW_B}, 
-          {'near': None, 'spotted': None}) 
+          {'near': SND_ENEMY_NEAR, 'spotted': SND_ENEMY_COLLISION})
 ]
 
 # --- KEY & BATTERY SETUP ---
@@ -407,6 +403,11 @@ font_sm = pygame.font.Font(None, 36)
 font_lg = pygame.font.Font(None, 74)
 
 # --- ENGINE FUNCTIONS ---
+
+def draw_world():
+    global game_surface, player_pos, player_angle, z_buffer 
+    
+    game_surface.fill(BLACK)
 
 # --- RAYCASTING FUNCTION ---
 def cast_ray(px, py, pa, ra):
@@ -485,8 +486,6 @@ def update_audio(state):
     else:
         closest_dist = 9999
         closest_enemy = None
-
-    any_chasing = any(e.is_chasing for e in enemies)
     
     if state == "GAME":
         if closest_dist > 500:
@@ -496,34 +495,19 @@ def update_audio(state):
             CH_ENEMY_PROX.fadeout(500) 
         else:
             CH_PROXIMITY.fadeout(500) 
-            if not any_chasing and closest_enemy:
+            if closest_enemy:
                 unique_near_snd = closest_enemy.sounds.get('near')
                 if unique_near_snd and not CH_ENEMY_PROX.get_busy():
                     CH_ENEMY_PROX.play(unique_near_snd, loops=-1)
+                
                 dx, dy = closest_enemy.x - player.x, closest_enemy.y - player.y
                 rel_angle = math.atan2(dy, dx) - player.angle
                 pan = math.sin(rel_angle) 
                 base_vol = sound_volumes.get("enemy_near", 0.5) * master_volume
-                l_vol = base_vol * (0.5 - pan * 0.5)
-                r_vol = base_vol * (0.5 + pan * 0.5)
-                CH_ENEMY_PROX.set_volume(l_vol, r_vol)
-            else:
-                CH_ENEMY_PROX.fadeout(500) 
+                CH_ENEMY_PROX.set_volume(base_vol * (0.5 - pan * 0.5), base_vol * (0.5 + pan * 0.5))
     else:
         CH_PROXIMITY.stop()
         CH_ENEMY_PROX.stop()
-
-    if any_chasing and not player.is_hiding and state == "GAME":
-        if SND_CHASE and not CH_CHASE.get_busy(): 
-            CH_CHASE.play(SND_CHASE, loops=-1)
-        if closest_enemy:
-            dx, dy = closest_enemy.x - player.x, closest_enemy.y - player.y
-            rel_angle = math.atan2(dy, dx) - player.angle
-            pan = math.sin(rel_angle)
-            base_vol = sound_volumes.get("chase", 0.5) * master_volume
-            CH_CHASE.set_volume(base_vol * (0.5 - pan * 0.5), base_vol * (0.5 + pan * 0.5))
-    else: 
-        CH_CHASE.fadeout(1000)
 
 # --- HUD RENDERING FUNCTION ---
 def draw_hud(surface):
@@ -553,6 +537,10 @@ def draw_hud(surface):
 def main():
     global flashlight_on, flashlight_battery, is_fullscreen, screen, mouse_sensitivity, z_buffer, keys_list, jumpscare_timer, killer_sprite
     
+    menu_light_on = True
+    flicker_timer = pygame.time.get_ticks()
+    flicker_delay = 3000
+
     state = "MENU"
     previous_state = "MENU"
     game_started = False
@@ -586,18 +574,23 @@ def main():
             if event.type == QUIT: running = False
             if event.type == MOUSEBUTTONDOWN:
                 if state == "MENU":
-                    if 380 < imx < 580:
-                        if 260 < imy < 300: 
-                            state, game_started = "GAME", True
-                            pygame.mixer.music.fadeout(1000)
-                            if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, loops=-1)
-                            pygame.mouse.set_visible(False)
-                            pygame.event.set_grab(True)
-                            pygame.mouse.get_rel() 
-                        elif 310 < imy < 350: 
-                            previous_state = "MENU"
-                            state = "OPTIONS"
-                        elif 360 < imy < 400: running = False
+                    button_y = 480
+                    spacing = 200
+                    for i, tx in enumerate(["START GAME", "OPTIONS", "EXIT"]):
+                        bx = (INTERNAL_WIDTH // 2) + (i - 1) * spacing
+                        if bx - 80 < imx < bx + 80 and button_y - 30 < imy < button_y + 30:
+                            if i == 0: # START GAME
+                                state, game_started = "GAME", True
+                                pygame.mixer.music.fadeout(1000)
+                                if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, loops=-1)
+                                pygame.mouse.set_visible(False)
+                                pygame.event.set_grab(True)
+                                pygame.mouse.get_rel()
+                            elif i == 1: # OPTIONS
+                                previous_state = "MENU"
+                                state = "OPTIONS"
+                            elif i == 2: # EXIT
+                                running = False
 
                 elif state == "PAUSE":
                     if 380 < imx < 580:
@@ -698,7 +691,13 @@ def main():
                     state = "JUMPSCARE"
                     jumpscare_timer = 45
                     killer_sprite = e.sprites['front']
-                    if e.sounds['spotted']: e.sounds['spotted'].play()
+        
+                    CH_WALK.stop()
+                    CH_ENEMY_PROX.stop()
+    
+                    if SND_ENEMY_COLLISION:
+                        pygame.mixer.Channel(5).set_volume(1.0)
+                        pygame.mixer.Channel(5).play(SND_ENEMY_COLLISION)
                     pygame.mouse.set_visible(True)
                     pygame.event.set_grab(False)
                     CH_AMBIENT.stop()
@@ -752,12 +751,14 @@ def main():
                 elif tt == 2: target_img = IMG_LOCKER
 
                 if target_img:
+                    rd = d * math.cos(ra - player.angle)
                     if side == 1:
-                        wall_x = (player.x + rd * math.cos(ra)) % TILE_SIZE
+                        wall_x = (player.x + d * math.cos(ra)) % TILE_SIZE
                     else:
-                        wall_x = (player.y + rd * math.sin(ra)) % TILE_SIZE
-                    
+                        wall_x = (player.y + d * math.sin(ra)) % TILE_SIZE
                     tex_x = int(wall_x * (target_img.get_width() / TILE_SIZE))
+                    tex_x = max(0, min(tex_x, target_img.get_width() - 1))
+                    
                     column = target_img.subsurface(tex_x, 0, 1, target_img.get_height())
                     
                     scaled_col = pygame.transform.scale(column, (math.ceil(SCALE) + 1, int(h)))
@@ -778,12 +779,11 @@ def main():
 
 # --- TEXTURE MAPPING & SPECIAL TILES ---
             if target_img:
-                wall_x = (player.x + rd * math.cos(ra)) % TILE_SIZE if side == 1 else (player.y + rd * math.sin(ra)) % TILE_SIZE
-                cos_a = math.cos(ra)
-                sin_a = math.sin(ra)
-
-                if (side == 0 and cos_a > 0) or (side == 1 and sin_a < 0):
-                    wall_x = TILE_SIZE - wall_x - 1
+                if side == 1:
+                    wall_x = (player.x + rd * math.cos(ra)) % TILE_SIZE
+                else:
+                    wall_x = (player.y + rd * math.sin(ra)) % TILE_SIZE
+                
                 tex_x = int(wall_x * (target_img.get_width() / TILE_SIZE))
                 tex_x = max(0, min(tex_x, target_img.get_width() - 1))
                     
@@ -844,21 +844,42 @@ def main():
             game_surface.blit(font_sm.render(f"KEYS: {player.keys_collected}/15", True, SILVER if player.keys_collected < 15 else GREEN), (30, 100))
          
         elif state == "JUMPSCARE":
+            draw_world() 
+            
             if killer_sprite:
+                shake_x = random.randint(-15, 15)
+                shake_y = random.randint(-15, 15)
+                
                 js_img = pygame.transform.scale(killer_sprite, (INTERNAL_HEIGHT, INTERNAL_HEIGHT))
-                game_surface.blit(js_img, js_img.get_rect(center=(INTERNAL_WIDTH//2, INTERNAL_HEIGHT//2)))
+                js_rect = js_img.get_rect(center=(INTERNAL_WIDTH // 2 + shake_x, INTERNAL_HEIGHT // 2 + shake_y))
+                game_surface.blit(js_img, js_rect)
+                
             jumpscare_timer -= 1
             if jumpscare_timer <= 0:
                 state = "DEAD"
 
         elif state == "MENU":
-            game_surface.fill(BLACK)
-            title = font_lg.render("HIDE & SEEK", True, RED)
-            game_surface.blit(title, title.get_rect(center=(480, 150)))
-            for i, tx in enumerate(["CONTINUE" if game_started else "START GAME", "OPTIONS", "EXIT"]):
-                y = 280 + (i * 50)
-                btn = font_sm.render(tx, True, WHITE if (380 < imx < 580 and y-20 < imy < y+20) else GRAY)
-                game_surface.blit(btn, btn.get_rect(center=(480, y)))
+            current_time = pygame.time.get_ticks()
+            if current_time - flicker_timer > flicker_delay:
+                menu_light_on = not menu_light_on
+                flicker_timer = current_time
+                flicker_delay = random.randint(1000, 2000)
+
+            if menu_light_on:
+                game_surface.blit(flashlight_menu_on, (0, 0))
+            else:
+                game_surface.blit(flashlight_menu_off, (0, 0))
+
+            menu_options = ["START GAME", "OPTIONS", "EXIT"]
+            button_y = 480
+            spacing = 200
+            
+            for i, tx in enumerate(menu_options):
+                button_x = (INTERNAL_WIDTH // 2) + (i - 1) * spacing
+                is_hovered = (button_x - 80 < imx < button_x + 80 and button_y - 30 < imy < button_y + 30)
+                
+                btn = font_sm.render(tx, True, WHITE if is_hovered else GRAY)
+                game_surface.blit(btn, btn.get_rect(center=(button_x, button_y)))
 
         elif state == "PAUSE":
             game_surface.fill(BLACK)
