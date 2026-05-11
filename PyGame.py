@@ -282,7 +282,7 @@ class Enemy:
 
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 0, 0
+        self.speed_wander, self.speed_chase = 3, 2
         self.detection_range, self.is_chasing = 600, False
         self.wander_angle = random.uniform(0, math.pi * 2)
         self.chase_timer = 0
@@ -581,7 +581,14 @@ def main():
                     for i, tx in enumerate(["START GAME", "OPTIONS", "EXIT"]):
                         bx = (INTERNAL_WIDTH // 2) + (i - 1) * spacing
                         if bx - 80 < imx < bx + 80 and button_y - 30 < imy < button_y + 30:
-                            if i == 0: # START GAME
+                            if i == 0:
+                                player.reset(1050, 1950)
+                                for e in enemies: e.reset()
+                                keys_list = generate_keys()
+                                for b in batteries: b.respawn()
+                                flashlight_battery = 1000 
+                                flashlight_on = True
+                                
                                 state, game_started = "GAME", True
                                 pygame.mixer.music.fadeout(1000)
                                 if SND_AMBIENT: CH_AMBIENT.play(SND_AMBIENT, loops=-1)
