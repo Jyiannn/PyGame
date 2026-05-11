@@ -102,6 +102,8 @@ IMG_DEFAULT = get_image("Walls/default_wall.png", (150, 0, 0))
 IMG_RUN = get_image("Walls/run_wall.png", (60, 60, 60))
 IMG_HIDE = get_image("Walls/hide_wall.png", (40, 80, 40))
 IMG_LOCKER = get_image("Walls/locker.png", (150, 150, 150))
+IMG_EXIT = get_image("Walls/exit_door.png", PURPLE)
+
 # --- TITLE SCREEN ---
 flashlight_menu_on = pygame.image.load("flashlight_menu_on.png").convert_alpha()
 flashlight_menu_on = pygame.transform.scale(flashlight_menu_on, (INTERNAL_WIDTH, INTERNAL_HEIGHT))
@@ -280,7 +282,7 @@ class Enemy:
 
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 1, 1.5
+        self.speed_wander, self.speed_chase = 0, 0
         self.detection_range, self.is_chasing = 600, False
         self.wander_angle = random.uniform(0, math.pi * 2)
         self.chase_timer = 0
@@ -748,6 +750,7 @@ def main():
                 elif tt == 5: target_img = IMG_DEFAULT
                 elif tt == 6: target_img = IMG_RUN
                 elif tt == 7: target_img = IMG_HIDE
+                elif tt == 3: target_img = IMG_EXIT
                 elif tt == 2: target_img = IMG_LOCKER
 
                 if target_img:
