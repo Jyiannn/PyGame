@@ -280,34 +280,40 @@ class Enemy:
         self.last_dx, self.last_dy = 0, 0
         self.chase_timer = 0
         self.chase_persistence = 180
+        self.target_tile = (int(x // TILE_SIZE), int(y // TILE_SIZE))
         self.reset()
 
     def reset(self):
         self.x, self.y = self.start_x, self.start_y
-        self.speed_wander, self.speed_chase = 3, 2
+        self.speed_wander, self.speed_chase = 1.2, 2.5
         self.detection_range, self.is_chasing = 600, False
-        self.wander_angle = random.uniform(0, math.pi * 2)
+        self.target_tile = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
         self.chase_timer = 0
+
+    def get_valid_neighbors(self, tx, ty):
+        neighbors = []
+        for dx, dy in [(0, -1), (0, 1), (1, 0), (-1, 0)]:
+            nx, ny = tx + dx, ty + dy
+            if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
+                if world_map[ny][nx] == 0: 
+                    neighbors.append((nx, ny))
+        return neighbors
 
     def update(self, player):
         dx_p, dy_p = player.x - self.x, player.y - self.y
         dist = math.hypot(dx_p, dy_p)
-
+        
         currently_seen = False
-
         if not player.is_hiding and flashlight_on and dist < self.detection_range:
             angle_to_player = math.atan2(dy_p, dx_p)
             currently_seen = True
-            
             for d in range(0, int(dist), 25):
                 tx, ty = int((self.x + d * math.cos(angle_to_player)) // TILE_SIZE), \
                          int((self.y + d * math.sin(angle_to_player)) // TILE_SIZE)
-                if 0 <= tx < MAP_SIZE and 0 <= ty < MAP_SIZE:
-                    if world_map[ty][tx] in [1, 3]: 
-                        currently_seen = False
-                        break
+                if world_map[ty][tx] in [1, 3, 5]:
+                    currently_seen = False
+                    break
 
-        ex, ey = 0, 0
         if currently_seen:
             self.chase_timer = self.chase_persistence
             self.is_chasing = True
@@ -316,25 +322,35 @@ class Enemy:
         else:
             self.is_chasing = False
 
-        if self.is_chasing:
-            angle = math.atan2(dy_p, dx_p)
-            ex, ey = self.speed_chase * math.cos(angle), self.speed_chase * math.sin(angle)
-        else:
-            ex, ey = self.speed_wander * math.cos(self.wander_angle), \
-                     self.speed_wander * math.sin(self.wander_angle)
+        # --- MOVEMENT LOGIC (Grid-Centered) ---
+        target_x = self.target_tile[0] * TILE_SIZE + 50
+        target_y = self.target_tile[1] * TILE_SIZE + 50
         
-        margin = 15
-        moved_x, moved_y = False, False
-        if world_map[int(self.y // TILE_SIZE)][int((self.x + ex + (margin if ex>0 else -margin)) // TILE_SIZE)] == 0: 
-            self.x += ex
-            moved_x = True
-        if world_map[int((self.y + ey + (margin if ey>0 else -margin)) // TILE_SIZE)][int(self.x // TILE_SIZE)] == 0: 
-            self.y += ey
-            moved_y = True
-        else: 
-            self.wander_angle = random.uniform(0, math.pi * 2)
+        dist_to_target = math.hypot(target_x - self.x, target_y - self.y)
         
-        self.last_dx, self.last_dy = (ex if moved_x else 0), (ey if moved_y else 0)
+        if dist_to_target < 5:
+            current_tx, current_ty = int(self.x // TILE_SIZE), int(self.y // TILE_SIZE)
+            
+            if self.is_chasing:
+                neighbors = self.get_valid_neighbors(current_tx, current_ty)
+                if neighbors:
+                    self.target_tile = min(neighbors, key=lambda t: math.hypot((t[0]*TILE_SIZE+50) - player.x, (t[1]*TILE_SIZE+50) - player.y))
+            else:
+                neighbors = self.get_valid_neighbors(current_tx, current_ty)
+                if neighbors:
+                    if len(neighbors) > 1:
+                        back_tile = (current_tx - int(self.last_dx/5), current_ty - int(self.last_dy/5))
+                        neighbors = [n for n in neighbors if n != back_tile]
+                    self.target_tile = random.choice(neighbors)
+
+        angle = math.atan2(target_y - self.y, target_x - self.x)
+        speed = self.speed_chase if self.is_chasing else self.speed_wander
+        
+        ex, ey = speed * math.cos(angle), speed * math.sin(angle)
+        self.x += ex
+        self.y += ey
+        
+        self.last_dx, self.last_dy = ex, ey
         return dist
 
 # --- WORLD MAP & SETUP ---
@@ -451,31 +467,43 @@ def draw_sprites(surface):
         if not b.picked_up: all_sprites.append({'x': b.x, 'y': b.y, 'img': SPRITE_BATTERY, 'type': 'B'})
     for k in keys_list:
         if not k.picked_up: all_sprites.append({'x': k.x, 'y': k.y, 'img': SPRITE_KEY, 'type': 'K'})
+    
     all_sprites.sort(key=lambda s: math.hypot(player.x - s['x'], player.y - s['y']), reverse=True)
     bob_time = pygame.time.get_ticks() * 0.005
+    
     for s in all_sprites:
         dx, dy = s['x'] - player.x, s['y'] - player.y
         dist = math.hypot(dx, dy)
         if dist > 800 or dist < 10: continue
+        
         theta = math.atan2(dy, dx) - player.angle
         while theta > math.pi: theta -= 2*math.pi
         while theta < -math.pi: theta += 2*math.pi
+        
         if abs(theta) < HALF_FOV + 0.5: 
             proj_dist = dist * math.cos(theta)
-            wall_h = 30000 / (proj_dist + 0.0001)
+            wall_h = 30000 / (proj_dist + 0.0001) 
             middle_x = INTERNAL_WIDTH / 2 + theta * INTERNAL_WIDTH / RAD_FOV
+            
             if flashlight_on and abs(theta) < math.radians(25):
                 edge_softness = 1.0 - (abs(theta) / math.radians(25))
                 lf = max(0, (1 - (dist/400)**2) * edge_softness)
             else:
                 lf = 0
             it = int(255 * lf)
+
             if s['type'] == 'E':
-                s_width, s_height = int(wall_h * 1.0), int(wall_h * 1.4)
+
+                img_rect = s['img'].get_rect()
+                aspect_ratio = img_rect.width / img_rect.height
+                
+                s_height = int(wall_h * 1.4)
+                s_width = int(s_height * aspect_ratio)
                 y_pos = (INTERNAL_HEIGHT / 2) - (s_height / 2)
             else:
                 s_width, s_height = int(wall_h * 0.25), int(wall_h * 0.25)
                 y_pos = (INTERNAL_HEIGHT / 2) + (wall_h * 0.5) - s_height - (math.sin(bob_time) * (wall_h * 0.05))
+            
             ray_idx = int(middle_x / SCALE)
             if 0 <= ray_idx < NUM_RAYS and dist < z_buffer[ray_idx]:
                 scaled_img = pygame.transform.scale(s['img'], (max(1, s_width), max(1, s_height)))
@@ -515,6 +543,9 @@ def update_audio(state):
 
 # --- HUD RENDERING FUNCTION ---
 def draw_hud(surface):
+    
+    draw_minimap(surface)
+    
     if player.is_hiding:
         return
     hud_img = SPRITE_FLASHLIGHT_ON if flashlight_on else SPRITE_FLASHLIGHT_OFF
@@ -536,6 +567,30 @@ def draw_hud(surface):
     hud_y = (INTERNAL_HEIGHT - 280) + bob_offset
     
     surface.blit(scaled_hud, (hud_x, hud_y))
+
+def draw_minimap(surface):
+    map_scale = 6  
+    map_size = MAP_SIZE * map_scale
+    
+    offset_x = INTERNAL_WIDTH - map_size - 20
+    offset_y = 20
+    
+    pygame.draw.rect(surface, (30, 30, 30), (offset_x - 2, offset_y - 2, map_size + 4, map_size + 4))
+    pygame.draw.rect(surface, BLACK, (offset_x, offset_y, map_size, map_size))
+    
+    for row in range(MAP_SIZE):
+        for col in range(MAP_SIZE):
+            tile = world_map[row][col]
+            if tile != 0: # If not floor
+                color = GRAY
+                if tile == 3: color = PURPLE
+                elif tile == 2: color = LOCKER_COL
+                
+                pygame.draw.rect(surface, color, (offset_x + col * map_scale, offset_y + row * map_scale, map_scale - 1, map_scale - 1))
+    
+    px = offset_x + (player.x / TILE_SIZE) * map_scale
+    py = offset_y + (player.y / TILE_SIZE) * map_scale
+    pygame.draw.circle(surface, RED, (int(px), int(py)), 3)
 
 # --- MAIN LOOP ---
 def main():
